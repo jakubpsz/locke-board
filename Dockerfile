@@ -1,5 +1,5 @@
 # ---------- Build stage ----------
-FROM maven:3.9.3-eclipse-temurin-25 AS build
+FROM maven:3.9.11-jdk-25 AS build
 
 # Set working directory
 WORKDIR /app
@@ -25,5 +25,4 @@ COPY --from=build /app/target/*.jar app.jar
 # Expose application port
 EXPOSE 8080
 
-# Run the Spring Boot application
 CMD ["java", "-jar", "app.jar"]
