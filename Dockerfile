@@ -1,5 +1,5 @@
 # ---------- Build stage ----------
-FROM maven:3.9.11-jdk-25 AS build
+FROM maven:3.9.3-eclipse-temurin-17 AS build
 
 # Set working directory
 WORKDIR /app
@@ -17,7 +17,7 @@ COPY src ./src
 RUN mvn clean package -DskipTests
 
 # ---------- Runtime stage ----------
-FROM eclipse-temurin:25-jdk
+FROM eclipse-temurin:17-jdk AS runtime
 
 WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
