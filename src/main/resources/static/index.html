@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LockeBoard</title>
+  <style>
+    html,body { height:100%; margin:0; background:#f7f7f7; font-family:Arial,Helvetica,sans-serif; }
+    .toolbar { position:fixed; top:8px; left:50%; transform:translateX(-50%); z-index:10; background:rgba(255,255,255,0.9); padding:6px 10px; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.12); }
+    #canvas { touch-action: none; display:block; margin:0; width:100vw; height:100vh; background:white; }
+    .status { font-size:12px; color:#333; margin-left:8px; }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <span>Color: <input id="color" type="color" value="#000000"></span>
+    <span style="margin-left:12px">Line: <input id="size" type="range" min="1" max="40" value="4"></span>
+    <span class="status" id="status">Connecting...</span>
+  </div>
+  <canvas id="canvas"></canvas>
+
+<script>
+    /*
+     Improved Whiteboard Client
+     - Continuous lines (remote + local)
+     - Proper pointer tracking for touch + stylus
+     - Full-window scaling without wiping canvas
+   */
+
+   // === Canvas setup ===
+   const canvas = document.getElementById('canvas');
+   const colorInput = document.getElementById('color');
+   const sizeInput = document.getElementById('size');
+   const statusEl = document.getElementById('status');
+   const ctx = canvas.getContext('2d');
+
+   function resizeCanvasPreserve() {
+     const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+     canvas.width = window.innerWidth * devicePixelRatio;
+     canvas.height = window.innerHeight * devicePixelRatio;
+
+     canvas.style.width = window.innerWidth + "px";
+     canvas.style.height = window.innerHeight + "px";
+
+     ctx.scale(devicePixelRatio, devicePixelRatio);
+     ctx.lineJoin = "round";
+     ctx.lineCap = "round";
+
+     ctx.putImageData(img, 0, 0);
+   }
+
+   window.addEventListener('resize', resizeCanvasPreserve);
+   resizeCanvasPreserve();
+
+   // === WebSocket ===
+   const proto = location.protocol === "https:" ? "wss" : "ws";
+   const socket = new WebSocket(proto + "://" + location.host + "/ws/draw");
+
+   socket.addEventListener("open", () => statusEl.textContent = "Connected");
+   socket.addEventListener("close", () => statusEl.textContent = "Disconnected");
+
+   // === Pointer State (local + remote) ===
+   let localDrawing = false;
+   let lastLocalX = 0;
+   let lastLocalY = 0;
+
+   const remotePointers = {};
+   // remotePointers[clientId] = { lastX, lastY }
+
+   // === Send drawing over WS ===
+   function sendDraw(event, x, y, pressure, size, color) {
+     if (socket.readyState === WebSocket.OPEN) {
+       socket.send(JSON.stringify({
+         type: "draw",
+         event,
+         x,
+         y,
+         pressure,
+         size,
+         color,
+         id: socket._id || "default"
+       }));
+     }
+   }
+
+   // === Local Rendering ===
+   function drawLine(x1, y1, x2, y2, size, color, pressure) {
+     ctx.strokeStyle = color;
+     ctx.lineWidth = Math.max(1, size * (pressure || 0.5));
+     ctx.beginPath();
+     ctx.moveTo(x1, y1);
+     ctx.lineTo(x2, y2);
+     ctx.stroke();
+   }
+
+   // === Pointer Events ===
+   canvas.addEventListener("pointerdown", e => {
+     localDrawing = true;
+     canvas.setPointerCapture(e.pointerId);
+
+     const rect = canvas.getBoundingClientRect();
+     lastLocalX = e.clientX - rect.left;
+     lastLocalY = e.clientY - rect.top;
+
+     sendDraw("start", lastLocalX, lastLocalY, e.pressure, sizeInput.value, colorInput.value);
+   });
+
+   canvas.addEventListener("pointermove", e => {
+     if (!localDrawing) return;
+
+     const rect = canvas.getBoundingClientRect();
+     const x = e.clientX - rect.left;
+     const y = e.clientY - rect.top;
+
+     drawLine(lastLocalX, lastLocalY, x, y, sizeInput.value, colorInput.value, e.pressure);
+
+     sendDraw("move", x, y, e.pressure, sizeInput.value, colorInput.value);
+
+     lastLocalX = x;
+     lastLocalY = y;
+   });
+
+   canvas.addEventListener("pointerup", e => {
+     localDrawing = false;
+     canvas.releasePointerCapture(e.pointerId);
+
+     const rect = canvas.getBoundingClientRect();
+     sendDraw("end", e.clientX - rect.left, e.clientY - rect.top, 0, sizeInput.value, colorInput.value);
+   });
+
+   // === Remote Rendering ===
+   socket.addEventListener("message", ev => {
+     const msg = JSON.parse(ev.data);
+     if (msg.type !== "draw") return;
+
+     let client = remotePointers[msg.id];
+     if (!client) {
+       client = remotePointers[msg.id] = { lastX: msg.x, lastY: msg.y };
+     }
+
+     if (msg.event === "start") {
+       client.lastX = msg.x;
+       client.lastY = msg.y;
+       return;
+     }
+
+     if (msg.event === "move") {
+       drawLine(client.lastX, client.lastY, msg.x, msg.y, msg.size, msg.color, msg.pressure);
+       client.lastX = msg.x;
+       client.lastY = msg.y;
+       return;
+     }
+
+     if (msg.event === "end") {
+       delete remotePointers[msg.id];
+       return;
+     }
+   });
+
+
+</script>
+</body>
+</html>
