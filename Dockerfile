@@ -1,36 +1,29 @@
-# ============================
-# 1) BUILD STAGE
-# ============================
-FROM eclipse-temurin:25-jdk AS build
+# ---------- Build stage ----------
+FROM maven:3.9.3-eclipse-temurin-25 AS build
 
-# Set work directory
+# Set working directory
 WORKDIR /app
 
-# Copy Maven descriptor first (better caching)
+# Copy pom.xml first to leverage Docker cache
 COPY pom.xml .
 
-# Download dependencies (cached layer)
-RUN mvn -q -B dependency:go-offline
+# Download dependencies
+RUN mvn dependency:go-offline
 
-# Copy the rest of the project
+# Copy source code
 COPY src ./src
 
-# Build application
-RUN mvn -q -B clean package -DskipTests
+# Package the application
+RUN mvn clean package -DskipTests
 
-
-# ============================
-# 2) RUNTIME STAGE
-# ============================
-FROM eclipse-temurin:25-jre
+# ---------- Runtime stage ----------
+FROM eclipse-temurin:25-jdk
 
 WORKDIR /app
+COPY --from=build /app/target/*.jar app.jar
 
-# Copy JAR from build stage
-COPY --from=build /app/target/whiteboard-0.1.0.jar app.jar
-
-# Expose port Spring Boot runs on
+# Expose application port
 EXPOSE 8080
 
-# Start the application
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Run the Spring Boot application
+ENTRYPOINT ["java","-jar","app.jar"]
